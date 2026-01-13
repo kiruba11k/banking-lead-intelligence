@@ -1,846 +1,441 @@
 """
-Banking Lead Intelligence Platform
-Complete automated lead scoring from LinkedIn URLs
+Banking Lead Scoring - Completely Dynamic
+No defaults, no static values, everything from APIs
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-import yaml
 import time
 import json
-import re
 from datetime import datetime
-from typing import Dict, Optional, List
 import plotly.graph_objects as go
 
 # Import core modules
-from core.linkedin_extractor import LinkedInProfileExtractor
-from core.company_analyzer import CompanyMetricsAnalyzer
-from core.feature_pipeline import LeadFeaturePipeline
-from core.model_handler import LeadScoringModel
+from core.apify_extractor import LinkedInAPIExtractor
+from core.company_api import CompanyDataAPI
+from core.feature_builder import DynamicFeatureBuilder
+from core.model_predictor import ModelPredictor
 
 # Page configuration
 st.set_page_config(
-    page_title="Banking Lead Intelligence Platform",
+    page_title="Dynamic Lead Scoring",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Load configuration
-with open('config.yaml', 'r') as f:
-    config = yaml.safe_load(f)
-
-# Custom CSS for professional interface
+# Professional CSS without emojis
 st.markdown("""
     <style>
     .main-header { 
-        font-family: 'Helvetica Neue', Arial, sans-serif; 
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
         color: #1e3a8a; 
         border-bottom: 2px solid #e2e8f0;
         padding-bottom: 15px;
-        margin-bottom: 25px;
     }
-    .section-card {
-        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        padding: 20px;
-        margin: 15px 0;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    .api-status {
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        margin-left: 10px;
     }
+    .status-success { background-color: #d1fae5; color: #065f46; }
+    .status-warning { background-color: #fef3c7; color: #92400e; }
+    .status-error { background-color: #fee2e2; color: #991b1b; }
     .data-field {
         background-color: #ffffff;
         border: 1px solid #e2e8f0;
-        border-left: 4px solid #3b82f6;
-        padding: 12px 15px;
-        margin: 8px 0;
+        padding: 12px;
+        margin: 6px 0;
         border-radius: 6px;
     }
-    .confidence-badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 11px;
-        font-weight: 600;
-        margin-left: 8px;
-    }
-    .high-confidence { background-color: #d1fae5; color: #065f46; }
-    .medium-confidence { background-color: #fef3c7; color: #92400e; }
-    .low-confidence { background-color: #fee2e2; color: #991b1b; }
-    .priority-badge {
-        padding: 6px 12px;
-        border-radius: 6px;
-        font-weight: bold;
-        font-size: 14px;
-    }
-    .stProgress > div > div > div > div {
-        background: linear-gradient(90deg, #1e3a8a 0%, #3b82f6 100%);
+    .required-field::after {
+        content: " *";
+        color: #dc2626;
     }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-class BankingLeadIntelligenceApp:
+class DynamicLeadScoringApp:
     def __init__(self):
-        """Initialize the application with all components."""
-        self.config = config
+        """Initialize dynamic application with no defaults."""
+        self.session_state = st.session_state
         
         # Initialize session state
-        self._init_session_state()
+        if 'raw_linkedin_data' not in self.session_state:
+            self.session_state.raw_linkedin_data = None
+        if 'raw_company_data' not in self.session_state:
+            self.session_state.raw_company_data = None
+        if 'user_input_data' not in self.session_state:
+            self.session_state.user_input_data = {}
+        if 'final_features' not in self.session_state:
+            self.session_state.final_features = None
+        if 'prediction' not in self.session_state:
+            self.session_state.prediction = None
+        if 'api_keys' not in self.session_state:
+            self.session_state.api_keys = {'apify': '', 'company': ''}
         
-        # Initialize core components
-        self.extractor = None
-        self.company_analyzer = CompanyMetricsAnalyzer()
-        self.feature_pipeline = LeadFeaturePipeline()
-        self.model_handler = LeadScoringModel()
-    
-    def _init_session_state(self):
-        """Initialize session state variables."""
-        if 'extracted_data' not in st.session_state:
-            st.session_state.extracted_data = None
-        if 'processed_lead' not in st.session_state:
-            st.session_state.processed_lead = None
-        if 'prediction_result' not in st.session_state:
-            st.session_state.prediction_result = None
-        if 'current_step' not in st.session_state:
-            st.session_state.current_step = 1  # 1: Input, 2: Review, 3: Results
-        if 'apify_key' not in st.session_state:
-            st.session_state.apify_key = ""
+        # Initialize APIs (will be set when keys are provided)
+        self.linkedin_extractor = None
+        self.company_api = None
+        self.feature_builder = DynamicFeatureBuilder()
+        self.model_predictor = ModelPredictor()
     
     def render_header(self):
-        """Render the application header."""
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            st.markdown('<h1 class="main-header">Banking Lead Intelligence Platform</h1>', 
-                       unsafe_allow_html=True)
-            st.markdown("""
-                <p style='color: #475569; font-size: 16px; line-height: 1.6;'>
-                Automated lead scoring for banking relationship managers. 
-                Enter a LinkedIn profile URL to automatically extract professional information, 
-                analyze company metrics, and generate predictive lead scores.
-                </p>
-                """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown(f"""
-                <div style='text-align: right; color: #64748b; font-size: 14px;'>
-                <strong>Model Version:</strong> 20260113<br>
-                <strong>Accuracy:</strong> 85.2%<br>
-                <strong>Last Updated:</strong> {datetime.now().strftime('%Y-%m-%d')}
-                </div>
-                """, unsafe_allow_html=True)
-        
+        """Render application header."""
+        st.markdown('<h1 class="main-header">Dynamic Lead Intelligence Platform</h1>', 
+                   unsafe_allow_html=True)
+        st.markdown("""
+            <p style='color: #475569; font-size: 16px;'>
+            All data is dynamically extracted from APIs. No defaults or static values are used.
+            Missing data will result in empty fields rather than estimates.
+            </p>
+        """, unsafe_allow_html=True)
         st.divider()
     
     def render_sidebar(self):
-        """Render the configuration sidebar."""
+        """Render API configuration sidebar."""
         with st.sidebar:
-            st.markdown('<h3 style="color: #1e3a8a;">Platform Configuration</h3>', 
-                       unsafe_handle_html=True)
+            st.markdown("### API Configuration")
             
-            # API Configuration
-            with st.expander("API Configuration", expanded=True):
-                apify_key = st.text_input(
-                    "Apify API Key",
-                    type="password",
-                    value=st.session_state.apify_key,
-                    help="Required for LinkedIn profile data extraction",
-                    key="apify_key_input"
-                )
-                
-                if apify_key and apify_key != st.session_state.apify_key:
-                    st.session_state.apify_key = apify_key
-                    self.extractor = LinkedInProfileExtractor(api_key=apify_key)
+            # Apify API Key
+            apify_key = st.text_input(
+                "Apify API Key",
+                type="password",
+                value=self.session_state.api_keys['apify'],
+                help="Required for LinkedIn profile extraction"
+            )
             
-            # Analysis Settings
-            with st.expander("Analysis Settings", expanded=True):
-                auto_extract = st.checkbox(
-                    "Auto-extract all fields",
-                    value=True,
-                    help="Automatically extract and estimate all required fields"
-                )
-                
-                enable_estimates = st.checkbox(
-                    "Enable intelligent estimates",
-                    value=True,
-                    help="Estimate company metrics when exact data is unavailable"
-                )
+            # Company Data API Key
+            company_key = st.text_input(
+                "Company Data API Key",
+                type="password",
+                value=self.session_state.api_keys['company'],
+                help="Required for company information"
+            )
             
-            # System Status
-            with st.expander("System Status", expanded=False):
-                if self.model_handler.is_loaded():
-                    st.success("Model Loaded")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("Features", "31")
-                    with col2:
-                        st.metric("Accuracy", "85.2%")
-                else:
-                    st.warning("Model Not Loaded")
+            # Update API instances if keys changed
+            if apify_key != self.session_state.api_keys['apify']:
+                self.session_state.api_keys['apify'] = apify_key
+                self.linkedin_extractor = LinkedInAPIExtractor(api_key=apify_key)
+            
+            if company_key != self.session_state.api_keys['company']:
+                self.session_state.api_keys['company'] = company_key
+                self.company_api = CompanyDataAPI(api_key=company_key)
             
             st.divider()
             
-            # Navigation
-            st.markdown('<h4 style="color: #1e3a8a;">Navigation</h4>', 
-                       unsafe_allow_html=True)
+            # Manual override section
+            st.markdown("### Manual Data Entry")
+            st.info("Use if APIs fail to extract required data")
             
-            if st.button("New Analysis", use_container_width=True):
-                self._reset_analysis()
+            manual_override = st.checkbox("Enable manual data entry")
             
-            if st.button("Export Results", use_container_width=True):
-                self._export_results()
+            if manual_override:
+                with st.form("manual_data_form"):
+                    st.text_input("Company Name", key="manual_company")
+                    st.text_input("Company Size", key="manual_size")
+                    st.text_input("Annual Revenue", key="manual_revenue")
+                    st.text_input("Industry", key="manual_industry")
+                    
+                    if st.form_submit_button("Save Manual Data"):
+                        self.session_state.user_input_data = {
+                            'company_name': st.session_state.manual_company,
+                            'company_size': st.session_state.manual_size,
+                            'annual_revenue': st.session_state.manual_revenue,
+                            'industry': st.session_state.manual_industry
+                        }
+                        st.success("Manual data saved")
     
     def render_input_section(self):
-        """Render the LinkedIn URL input section."""
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### Step 1: LinkedIn Profile Analysis")
+        """Render LinkedIn URL input and extraction."""
+        st.markdown("### Step 1: Data Extraction")
         
         # URL Input
         linkedin_url = st.text_input(
             "LinkedIn Profile URL",
             placeholder="https://linkedin.com/in/username",
-            help="Enter the complete LinkedIn profile URL",
-            key="linkedin_url_input"
+            key="linkedin_url"
         )
         
-        col1, col2 = st.columns(2)
+        # Extraction button
+        col1, col2 = st.columns([1, 3])
         with col1:
-            analyze_clicked = st.button(
-                "Analyze Profile",
+            extract_clicked = st.button(
+                "Extract Data",
                 type="primary",
-                use_container_width=True,
-                disabled=not st.session_state.apify_key
+                disabled=not self.session_state.api_keys['apify']
             )
         
         with col2:
-            if st.button("Use Sample Profile", use_container_width=True):
-                linkedin_url = "https://linkedin.com/in/kirubakaranperiyasamy"
-                analyze_clicked = True
+            if not self.session_state.api_keys['apify']:
+                st.warning("Enter Apify API key in sidebar")
         
-        if not st.session_state.apify_key:
-            st.warning("Please enter your Apify API key in the sidebar to begin analysis.")
-        
-        if analyze_clicked and linkedin_url:
-            if not st.session_state.apify_key:
-                st.error("Apify API key is required for profile analysis.")
-                return
-            
-            self._analyze_profile(linkedin_url)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+        if extract_clicked and linkedin_url:
+            self._extract_all_data(linkedin_url)
     
-    def _analyze_profile(self, linkedin_url: str):
-        """Analyze LinkedIn profile and extract data."""
+    def _extract_all_data(self, linkedin_url: str):
+        """Extract all data from APIs dynamically."""
         
-        # Initialize extractor
-        if not self.extractor:
-            self.extractor = LinkedInProfileExtractor(api_key=st.session_state.apify_key)
+        # Create progress tracking
+        progress_bar = st.progress(0)
+        status_container = st.container()
         
-        # Create progress container
-        progress_container = st.container()
-        
-        with progress_container:
+        with status_container:
             # Step 1: Extract LinkedIn data
-            st.info("Step 1/3: Extracting LinkedIn profile data...")
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+            st.markdown("#### LinkedIn Data Extraction")
+            progress_bar.progress(25)
             
             try:
-                # Extract data from LinkedIn
-                status_text.text("Connecting to Apify API...")
-                progress_bar.progress(20)
+                # Extract LinkedIn profile
+                linkedin_data = self.linkedin_extractor.extract_profile(linkedin_url)
                 
-                extracted_data = self.extractor.extract_profile_data(linkedin_url)
-                
-                if not extracted_data:
-                    st.error("Failed to extract LinkedIn profile data.")
+                if not linkedin_data:
+                    st.error("LinkedIn extraction failed")
                     return
                 
-                # Step 2: Analyze company metrics
-                status_text.text("Step 2/3: Analyzing company information...")
-                progress_bar.progress(50)
+                self.session_state.raw_linkedin_data = linkedin_data
+                st.success("✓ LinkedIn data extracted")
                 
-                # Get current role (most recent experience)
-                current_role = self._extract_current_role(extracted_data)
+                # Extract current company info
+                current_company = self._extract_current_company(linkedin_data)
                 
-                if not current_role:
-                    st.error("No professional experience found in profile.")
-                    return
+                if not current_company:
+                    st.warning("No current company found in profile")
+                    # Continue without company data
+                    self.session_state.raw_company_data = None
+                else:
+                    # Step 2: Extract company data
+                    st.markdown("#### Company Data Extraction")
+                    progress_bar.progress(50)
+                    
+                    company_url = current_company.get('company_linkedin_url')
+                    if company_url and self.company_api:
+                        company_data = self.company_api.get_company_data(company_url)
+                        
+                        if company_data:
+                            self.session_state.raw_company_data = company_data
+                            st.success("✓ Company data extracted")
+                        else:
+                            st.warning("Company data extraction failed")
+                            self.session_state.raw_company_data = None
+                    else:
+                        st.warning("Company URL not available")
+                        self.session_state.raw_company_data = None
                 
-                # Analyze company from current role
-                company_analysis = self.company_analyzer.analyze_company(
-                    current_role.get('company', ''),
-                    extracted_data
+                # Step 3: Build features
+                st.markdown("#### Feature Building")
+                progress_bar.progress(75)
+                
+                features = self.feature_builder.build_features(
+                    linkedin_data=self.session_state.raw_linkedin_data,
+                    company_data=self.session_state.raw_company_data,
+                    user_data=self.session_state.user_input_data
                 )
                 
-                # Step 3: Process lead data
-                status_text.text("Step 3/3: Processing lead information...")
-                progress_bar.progress(80)
-                
-                processed_lead = self._process_lead_data(
-                    extracted_data, 
-                    current_role, 
-                    company_analysis
-                )
-                
-                # Store in session state
-                st.session_state.extracted_data = extracted_data
-                st.session_state.processed_lead = processed_lead
-                st.session_state.current_step = 2
-                
-                # Complete progress
+                if features is not None:
+                    self.session_state.final_features = features
+                    st.success("✓ Features built dynamically")
+                    
+                    # Show extracted fields
+                    self._show_extracted_data()
+                    
+                    # Enable scoring
+                    st.session_state.ready_for_scoring = True
+                    
                 progress_bar.progress(100)
-                status_text.text("Analysis complete!")
-                time.sleep(0.5)
-                
-                # Clear progress indicators
-                progress_bar.empty()
-                status_text.empty()
-                
-                # Rerun to show next step
-                st.rerun()
                 
             except Exception as e:
                 progress_bar.empty()
-                status_text.empty()
-                st.error(f"Analysis failed: {str(e)}")
+                st.error(f"Extraction failed: {str(e)}")
     
-    def _extract_current_role(self, extracted_data: Dict) -> Optional[Dict]:
-        """Extract the current/most recent role from experience data."""
-        experiences = extracted_data.get('experience', [])
+    def _extract_current_company(self, linkedin_data: dict):
+        """Extract current company from LinkedIn data."""
+        experiences = linkedin_data.get('experience', [])
         
         if not experiences:
             return None
         
-        # First, look for current positions
-        current_positions = [
-            exp for exp in experiences 
-            if exp.get('is_current', False) == True
-        ]
+        # Find current position
+        for exp in experiences:
+            if exp.get('is_current', False):
+                return exp
         
-        if current_positions:
-            # Return most recent current position
-            return current_positions[0]
-        
-        # If no current position, return most recent past position
-        # Sort by start date (assuming most recent is first)
+        # If no current, use most recent
         return experiences[0] if experiences else None
     
-    def _process_lead_data(self, extracted_data: Dict, current_role: Dict, 
-                          company_analysis: Dict) -> Dict:
-        """Process all extracted data into lead format."""
+    def _show_extracted_data(self):
+        """Show dynamically extracted data."""
+        st.markdown("### Extracted Data Preview")
         
-        basic_info = extracted_data.get('basic_info', {})
+        # LinkedIn data
+        if self.session_state.raw_linkedin_data:
+            basic_info = self.session_state.raw_linkedin_data.get('basic_info', {})
+            current_company = self._extract_current_company(self.session_state.raw_linkedin_data)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Personal Information**")
+                if basic_info.get('fullname'):
+                    st.text(f"Name: {basic_info['fullname']}")
+                if basic_info.get('headline'):
+                    st.text(f"Headline: {basic_info['headline']}")
+                if basic_info.get('location', {}).get('full'):
+                    st.text(f"Location: {basic_info['location']['full']}")
+            
+            with col2:
+                st.markdown("**Professional Information**")
+                if current_company:
+                    if current_company.get('title'):
+                        st.text(f"Current Role: {current_company['title']}")
+                    if current_company.get('company'):
+                        st.text(f"Current Company: {current_company['company']}")
         
-        # Build lead data structure
-        lead_data = {
-            # Basic Information
-            'linkedin_url': basic_info.get('profile_url', ''),
-            'extraction_timestamp': datetime.now().isoformat(),
+        # Company data
+        if self.session_state.raw_company_data:
+            st.markdown("**Company Information**")
             
-            # Personal Information
-            'full_name': basic_info.get('fullname', ''),
-            'first_name': basic_info.get('first_name', ''),
-            'last_name': basic_info.get('last_name', ''),
-            'headline': basic_info.get('headline', ''),
-            'about': basic_info.get('about', ''),
-            'location': basic_info.get('location', {}).get('full', ''),
+            company_data = self.session_state.raw_company_data
             
-            # Current Role Information
-            'prospect_designation': current_role.get('title', ''),
-            'current_company': current_role.get('company', ''),
-            'role_location': current_role.get('location', ''),
-            'role_description': current_role.get('description', ''),
-            'role_start_date': current_role.get('start_date', {}),
-            'is_current_role': current_role.get('is_current', False),
+            col1, col2, col3 = st.columns(3)
             
-            # Company Analysis
-            'company_size': company_analysis.get('estimated_size', '51-200'),
-            'annual_revenue': company_analysis.get('estimated_revenue', '$10M-$50M'),
-            'industry_sector': company_analysis.get('industry', 'Technology'),
-            'company_reputation_score': company_analysis.get('reputation_score', 5),
+            with col1:
+                if company_data.get('size'):
+                    st.text(f"Size: {company_data['size']}")
             
-            # Career Metrics
-            'total_experience_years': self._calculate_experience_years(
-                extracted_data.get('experience', [])
-            ),
-            'current_tenure_months': self._calculate_current_tenure(current_role),
-            'education_level': self._get_education_level(
-                extracted_data.get('education', [])
-            ),
+            with col2:
+                if company_data.get('revenue'):
+                    st.text(f"Revenue: {company_data['revenue']}")
             
-            # LinkedIn Metrics
-            'connection_count': basic_info.get('connection_count', 0),
-            'follower_count': basic_info.get('follower_count', 0),
-            'is_premium_member': basic_info.get('is_premium', False),
-            
-            # Skills & Certifications
-            'top_skills': self._extract_top_skills(extracted_data),
-            'certification_count': len(extracted_data.get('certifications', [])),
-            'project_count': len(extracted_data.get('projects', [])),
-            
-            # Confidence Scores
-            'extraction_confidence': 'high',
-            'company_estimation_confidence': company_analysis.get('confidence', 'medium'),
-            
-            # Raw data reference
-            'raw_experience': extracted_data.get('experience', []),
-            'raw_education': extracted_data.get('education', [])
-        }
-        
-        return lead_data
+            with col3:
+                if company_data.get('industry'):
+                    st.text(f"Industry: {company_data['industry']}")
     
-    def _calculate_experience_years(self, experiences: List[Dict]) -> float:
-        """Calculate total years of professional experience."""
-        if not experiences:
-            return 0.0
-        
-        total_months = 0
-        
-        for exp in experiences:
-            duration = exp.get('duration', '')
-            
-            # Parse duration strings
-            if 'mos' in duration.lower():
-                # Extract months
-                match = re.search(r'(\d+)\s*mos', duration)
-                if match:
-                    total_months += int(match.group(1))
-            elif 'yrs' in duration.lower():
-                # Extract years and convert to months
-                match = re.search(r'(\d+)\s*yrs', duration)
-                if match:
-                    total_months += int(match.group(1)) * 12
-                # Check for additional months
-                month_match = re.search(r'(\d+)\s*mo', duration)
-                if month_match:
-                    total_months += int(month_match.group(1))
-        
-        # Convert to years
-        return round(total_months / 12, 1)
-    
-    def _calculate_current_tenure(self, current_role: Dict) -> int:
-        """Calculate tenure in current role in months."""
-        start_date = current_role.get('start_date', {})
-        
-        if not start_date:
-            return 0
-        
-        start_year = start_date.get('year', datetime.now().year)
-        start_month = self._month_to_number(start_date.get('month', 'Jan'))
-        
-        current_year = datetime.now().year
-        current_month = datetime.now().month
-        
-        return (current_year - start_year) * 12 + (current_month - start_month)
-    
-    def _month_to_number(self, month: str) -> int:
-        """Convert month name to number."""
-        months = {
-            'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
-            'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12
-        }
-        return months.get(month[:3], 1)
-    
-    def _get_education_level(self, education: List[Dict]) -> str:
-        """Determine highest education level."""
-        if not education:
-            return 'Bachelor\'s'
-        
-        for edu in education:
-            degree = edu.get('degree', '').lower()
-            if 'phd' in degree or 'doctor' in degree:
-                return 'PhD'
-            elif 'master' in degree or 'mba' in degree or 'ms' in degree:
-                return 'Master\'s'
-            elif 'bachelor' in degree or 'be' in degree or 'bs' in degree:
-                return 'Bachelor\'s'
-        
-        return 'Bachelor\'s'
-    
-    def _extract_top_skills(self, extracted_data: Dict) -> List[str]:
-        """Extract top skills from profile."""
-        skills = []
-        
-        # Extract from experiences
-        for exp in extracted_data.get('experience', []):
-            exp_skills = exp.get('skills', [])
-            if isinstance(exp_skills, list):
-                skills.extend([s for s in exp_skills if s not in skills])
-        
-        # Limit to top 10
-        return skills[:10]
-    
-    def render_review_section(self):
-        """Render the data review and adjustment section."""
-        if not st.session_state.processed_lead:
+    def render_scoring_section(self):
+        """Render scoring section."""
+        if not hasattr(st.session_state, 'ready_for_scoring') or not st.session_state.ready_for_scoring:
             return
         
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### Step 2: Review & Adjust Extracted Data")
+        st.markdown("### Step 2: Generate Score")
         
-        lead_data = st.session_state.processed_lead
-        
-        # Personal Information
-        with st.expander("Personal Information", expanded=True):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.text_input("Full Name", value=lead_data['full_name'], disabled=True)
-                st.text_input("Headline", value=lead_data['headline'], disabled=True)
-            
-            with col2:
-                st.text_input("Location", value=lead_data['location'], disabled=True)
-                st.text_input("LinkedIn URL", value=lead_data['linkedin_url'], disabled=True)
-        
-        # Professional Information
-        with st.expander("Professional Information", expanded=True):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                designation = st.text_input(
-                    "Current Designation",
-                    value=lead_data['prospect_designation'],
-                    key="designation_input"
-                )
-                company = st.text_input(
-                    "Current Company",
-                    value=lead_data['current_company'],
-                    key="company_input"
-                )
-            
-            with col2:
-                total_exp = st.number_input(
-                    "Total Experience (years)",
-                    min_value=0.0,
-                    max_value=50.0,
-                    value=lead_data['total_experience_years'],
-                    step=0.5,
-                    key="exp_input"
-                )
-                tenure = st.number_input(
-                    "Current Tenure (months)",
-                    min_value=0,
-                    max_value=600,
-                    value=lead_data['current_tenure_months'],
-                    key="tenure_input"
-                )
-        
-        # Company Information
-        with st.expander("Company Information", expanded=True):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Company size selection
-                size_options = ["1-10", "11-50", "51-200", "201-500", 
-                              "501-1000", "1001-5000", "5000+"]
-                current_size = lead_data['company_size']
-                size_index = size_options.index(current_size) if current_size in size_options else 2
-                
-                company_size = st.selectbox(
-                    "Company Size",
-                    options=size_options,
-                    index=size_index,
-                    key="size_input"
-                )
-                
-                # Update revenue based on size
-                revenue_map = config['estimation']['employee_ranges']
-                estimated_revenue = revenue_map.get(company_size, "$10M-$50M")
-            
-            with col2:
-                # Industry selection
-                industry_options = [
-                    "FinTech", "Commercial Banking", "Retail Banking",
-                    "Investment Banking", "Insurance", "Asset Management",
-                    "Technology", "Consulting", "Healthcare", "Other Financial"
-                ]
-                current_industry = lead_data['industry_sector']
-                industry_index = industry_options.index(current_industry) if current_industry in industry_options else 6
-                
-                industry = st.selectbox(
-                    "Industry Sector",
-                    options=industry_options,
-                    index=industry_index,
-                    key="industry_input"
-                )
-                
-                # Revenue display (read-only based on size)
-                st.text_input(
-                    "Estimated Annual Revenue",
-                    value=estimated_revenue,
-                    disabled=True,
-                    help="Estimated based on company size"
-                )
-        
-        # Generate Score Button
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("Generate Lead Score", type="primary", use_container_width=True):
-                # Update lead data with adjustments
-                updated_lead = lead_data.copy()
-                updated_lead.update({
-                    'prospect_designation': designation,
-                    'current_company': company,
-                    'total_experience_years': total_exp,
-                    'current_tenure_months': tenure,
-                    'company_size': company_size,
-                    'annual_revenue': estimated_revenue,
-                    'industry_sector': industry,
-                    'user_adjusted': True,
-                    'adjustment_timestamp': datetime.now().isoformat()
-                })
-                
-                st.session_state.processed_lead = updated_lead
-                self._generate_prediction(updated_lead)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+        if st.button("Generate Lead Score", type="primary"):
+            with st.spinner("Calculating score..."):
+                try:
+                    # Get prediction
+                    prediction = self.model_predictor.predict(
+                        self.session_state.final_features
+                    )
+                    
+                    self.session_state.prediction = prediction
+                    
+                    # Display results
+                    self._display_results(prediction)
+                    
+                except Exception as e:
+                    st.error(f"Scoring failed: {str(e)}")
     
-    def _generate_prediction(self, lead_data: Dict):
-        """Generate lead score prediction."""
-        with st.spinner("Generating predictive score..."):
-            try:
-                # Process through feature pipeline
-                features = self.feature_pipeline.transform(lead_data)
-                
-                # Generate prediction
-                prediction_result = self.model_handler.predict(features)
-                
-                # Store result
-                st.session_state.prediction_result = prediction_result
-                st.session_state.current_step = 3
-                
-                # Rerun to show results
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"Prediction failed: {str(e)}")
-    
-    def render_results_section(self):
-        """Render the prediction results section."""
-        if not st.session_state.prediction_result:
-            return
+    def _display_results(self, prediction: dict):
+        """Display prediction results."""
+        st.markdown("### Scoring Results")
         
-        prediction = st.session_state.prediction_result
+        # Priority display
+        priority = prediction.get('priority', 'UNKNOWN')
+        confidence = prediction.get('confidence', 0)
+        probabilities = prediction.get('probabilities', {})
         
-        st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("### Step 3: Lead Scoring Results")
+        # Priority colors
+        priority_colors = {
+            'COLD': '#64748b',
+            'COOL': '#3b82f6',
+            'WARM': '#f59e0b',
+            'HOT': '#dc2626'
+        }
         
-        # Priority Display
-        priority = prediction['priority']
-        confidence = prediction['confidence']
-        color = config['display']['priority_colors'].get(priority, "#64748b")
+        color = priority_colors.get(priority, '#64748b')
         
+        # Display priority
         col1, col2 = st.columns([2, 1])
         
         with col1:
             st.markdown(f"""
                 <div style='border-left: 5px solid {color}; padding-left: 20px;'>
                     <h2 style='color: {color}; margin: 0;'>Priority: {priority}</h2>
-                    <p style='color: #475569; font-size: 16px;'>Confidence: {confidence:.1%}</p>
+                    <p style='color: #475569;'>Confidence: {confidence:.1%}</p>
                 </div>
-                """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
         
         with col2:
-            score_value = prediction['probabilities'].get(priority, 0)
+            priority_prob = probabilities.get(priority, 0)
             st.markdown(f"""
                 <div style='text-align: center;'>
                     <div style='font-size: 12px; color: #64748b;'>SCORE</div>
-                    <div style='font-size: 42px; font-weight: bold; color: {color};'>
-                        {score_value:.0%}
+                    <div style='font-size: 36px; font-weight: bold; color: {color};'>
+                        {priority_prob:.0%}
                     </div>
                 </div>
-                """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
         
-        # Confidence bar
+        # Progress bar
         st.progress(float(confidence))
         
-        # Probability Distribution
-        st.markdown("#### Probability Distribution")
-        
-        prob_df = pd.DataFrame({
-            "Priority": ["COLD", "COOL", "WARM", "HOT"],
-            "Probability": [
-                prediction['probabilities'].get("COLD", 0),
-                prediction['probabilities'].get("COOL", 0),
-                prediction['probabilities'].get("WARM", 0),
-                prediction['probabilities'].get("HOT", 0)
-            ]
-        })
-        
-        # Create chart
-        fig = go.Figure(data=[
-            go.Bar(
-                x=prob_df["Priority"],
-                y=prob_df["Probability"],
-                marker_color=[
-                    config['display']['priority_colors']["COLD"],
-                    config['display']['priority_colors']["COOL"],
-                    config['display']['priority_colors']["WARM"],
-                    config['display']['priority_colors']["HOT"]
-                ],
-                text=[f"{p:.1%}" for p in prob_df["Probability"]],
-                textposition="auto",
-            )
-        ])
-        
-        fig.update_layout(
-            height=300,
-            margin=dict(l=20, r=20, t=20, b=20),
-            yaxis=dict(tickformat=".0%", range=[0, 1]),
-            showlegend=False
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Key Factors
-        if hasattr(self.model_handler.model, 'feature_importances_'):
-            st.markdown("#### Key Influencing Factors")
+        # Probability distribution
+        if probabilities:
+            st.markdown("#### Probability Distribution")
             
-            feature_importance = self.model_handler.get_feature_importance()
-            if feature_importance is not None:
-                top_features = feature_importance.head(5)
-                
-                for feature, importance in top_features.items():
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.text(feature)
-                    with col2:
-                        st.progress(float(importance))
+            prob_df = pd.DataFrame({
+                'Priority': list(probabilities.keys()),
+                'Probability': list(probabilities.values())
+            })
+            
+            # Create chart
+            fig = go.Figure(data=[
+                go.Bar(
+                    x=prob_df['Priority'],
+                    y=prob_df['Probability'],
+                    marker_color=[priority_colors.get(p, '#64748b') for p in prob_df['Priority']],
+                    text=[f'{p:.1%}' for p in prob_df['Probability']],
+                    textposition='auto'
+                )
+            ])
+            
+            fig.update_layout(
+                height=300,
+                margin=dict(l=20, r=20, t=20, b=20),
+                yaxis=dict(tickformat='.0%', range=[0, 1]),
+                showlegend=False
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
         
-        # Action Recommendations
-        self._render_action_recommendations(priority, confidence)
-        
-        # Export Options
-        st.markdown("---")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("Export Results", use_container_width=True):
-                self._export_results()
-        
-        with col2:
-            if st.button("New Analysis", use_container_width=True):
-                self._reset_analysis()
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    def _render_action_recommendations(self, priority: str, confidence: float):
-        """Render action recommendations based on priority."""
-        
-        recommendations = {
-            "HOT": {
-                "title": "Immediate Action Required",
-                "timeline": "Within 24 hours",
-                "actions": [
-                    "Contact via phone and personalized email",
-                    "Prepare tailored commercial banking proposal",
-                    "Schedule executive introduction meeting",
-                    "Initiate credit pre-approval process"
-                ]
-            },
-            "WARM": {
-                "title": "Strategic Nurturing",
-                "timeline": "Within 1 week",
-                "actions": [
-                    "Add to targeted email sequence",
-                    "Schedule introductory call within 3-5 days",
-                    "Share relevant industry insights",
-                    "Connect on LinkedIn with personalized message"
-                ]
-            },
-            "COOL": {
-                "title": "Long-term Cultivation",
-                "timeline": "Quarterly engagement",
-                "actions": [
-                    "Add to newsletter distribution",
-                    "Monitor for business changes or funding rounds",
-                    "Send quarterly market updates",
-                    "Re-evaluate in 90 days"
-                ]
-            },
-            "COLD": {
-                "title": "Database Maintenance",
-                "timeline": "Annual review",
-                "actions": [
-                    "Include in annual market communications",
-                    "Verify contact information yearly",
-                    "Monitor for significant changes",
-                    "Consider for broad campaigns"
-                ]
-            }
-        }
-        
-        guide = recommendations.get(priority, recommendations["COOL"])
-        
-        st.markdown("#### Recommended Action Plan")
-        
-        with st.container():
-            st.markdown(f"""
-                <div style='background-color: #f8fafc; padding: 20px; border-radius: 8px; border-left: 4px solid {config['display']['priority_colors'].get(priority, "#64748b")};'>
-                    <h4 style='color: #1e293b; margin-top: 0;'>{guide['title']}</h4>
-                    <div style='color: #475569; margin-bottom: 15px;'>
-                        <strong>Timeline:</strong> {guide['timeline']}
-                    </div>
-                    <div style='color: #334155;'>
-                        <strong>Key Actions:</strong>
-                        <ul style='margin-top: 10px;'>
-                            {''.join([f'<li>{action}</li>' for action in guide['actions']])}
-                        </ul>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-    
-    def _reset_analysis(self):
-        """Reset the analysis session."""
-        st.session_state.extracted_data = None
-        st.session_state.processed_lead = None
-        st.session_state.prediction_result = None
-        st.session_state.current_step = 1
-        st.rerun()
-    
-    def _export_results(self):
-        """Export analysis results."""
-        if not st.session_state.prediction_result:
-            st.warning("No results to export.")
-            return
-        
-        export_data = {
-            "lead_data": st.session_state.processed_lead,
-            "prediction": st.session_state.prediction_result,
-            "extraction_data": st.session_state.extracted_data,
-            "export_timestamp": datetime.now().isoformat(),
-            "model_version": "20260113"
-        }
-        
-        # Convert to JSON
-        json_str = json.dumps(export_data, indent=2, default=str)
-        
-        # Create download button
-        st.download_button(
-            label="Download Complete Analysis (JSON)",
-            data=json_str,
-            file_name=f"lead_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            mime="application/json"
-        )
+        # Feature importance
+        if hasattr(self.model_predictor.model, 'feature_importances_'):
+            st.markdown("#### Key Factors")
+            
+            importance = self.model_predictor.get_feature_importance()
+            if importance is not None:
+                for feature, score in importance.items():
+                    if score > 0.01:  # Only show meaningful factors
+                        st.text(f"{feature}: {score:.3f}")
     
     def run(self):
         """Main application execution."""
         self.render_header()
         
-        # Render based on current step
-        if st.session_state.current_step == 1:
-            self.render_input_section()
-        elif st.session_state.current_step == 2:
-            self.render_review_section()
-        elif st.session_state.current_step == 3:
-            self.render_results_section()
+        # Main layout
+        main_col, side_col = st.columns([3, 1])
         
-        # Always render sidebar
-        self.render_sidebar()
+        with main_col:
+            self.render_input_section()
+            
+            if hasattr(st.session_state, 'ready_for_scoring') and st.session_state.ready_for_scoring:
+                self.render_scoring_section()
+        
+        with side_col:
+            self.render_sidebar()
 
 # Run the application
 if __name__ == "__main__":
-    app = BankingLeadIntelligenceApp()
+    app = DynamicLeadScoringApp()
     app.run()
