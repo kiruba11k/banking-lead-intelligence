@@ -1,0 +1,91 @@
+{
+  "model_name": "banking_scoring_model_20260113_110158",
+  "timestamp": "20260113_110158",
+  "training_date": "2026-01-13T11:01:58.784546",
+  "config": {
+    "industry": "banking",
+    "label_mapping": {
+      "HOT": 3,
+      "WARM": 2,
+      "COOL": 1,
+      "COLD": 0
+    },
+    "text_features": [
+      "Prospect Designation",
+      "Company Name",
+      "Industry"
+    ],
+    "categorical_features": [
+      "Size"
+    ],
+    "numerical_features": [
+      "Revenue",
+      "LinkedIn Activity"
+    ],
+    "model_type": "xgboost",
+    "test_size": 0.2,
+    "random_state": 42,
+    "cv_folds": 5,
+    "max_features": 50,
+    "feature_selection_method": "importance",
+    "early_stopping_rounds": 20,
+    "n_estimators": 200,
+    "learning_rate": 0.1,
+    "max_depth": 6
+  },
+  "metrics": {
+    "accuracy": 0.8518518518518519,
+    "precision": 0.8464765300059418,
+    "recall": 0.8518518518518519,
+    "f1": 0.8480728616174911,
+    "roc_auc": 0.8883919130969404
+  },
+  "data_info": {
+    "n_features": 31,
+    "feature_names": [
+      "is_ceo",
+      "is_c_level",
+      "is_evp_svp",
+      "is_vp",
+      "is_director",
+      "is_manager",
+      "is_officer",
+      "in_lending",
+      "in_tech",
+      "in_operations",
+      "in_risk",
+      "in_finance",
+      "in_strategy",
+      "designation_length",
+      "designation_word_count",
+      "size_numeric",
+      "size_51_200",
+      "size_201_500",
+      "size_501_1000",
+      "size_1001_5000",
+      "size_5000_plus",
+      "revenue_millions",
+      "revenue_category",
+      "activity_days",
+      "is_active_week",
+      "is_active_month",
+      "is_consumer_lending",
+      "is_commercial_banking",
+      "is_retail_banking",
+      "is_fintech",
+      "is_credit_union"
+    ],
+    "label_mapping": {
+      "HOT": 3,
+      "WARM": 2,
+      "COOL": 1,
+      "COLD": 0
+    }
+  },
+  "model_info": {
+    "type": "xgboost",
+    "n_estimators": 200,
+    "learning_rate": 0.1,
+    "max_depth": 6
+  }
+}
