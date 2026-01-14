@@ -150,7 +150,7 @@ class DynamicLeadScoringApp:
                             'industry': st.session_state.manual_industry
                         }
                         st.success("Manual data saved")
-    !
+    
     def render_input_section(self):
         """Render LinkedIn URL input and extraction."""
         st.markdown("### Step 1: Data Extraction")
