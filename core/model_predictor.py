@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Optional
 import json
+from typing import List
 
 class ModelPredictor:
     """Handles model predictions with actual data only."""
