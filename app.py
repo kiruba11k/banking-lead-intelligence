@@ -314,33 +314,45 @@ class DynamicLeadScoringApp:
             with col3:
                 if company_data.get('industry'):
                     st.text(f"Industry: {company_data['industry']}")
-    
+    1
     def render_scoring_section(self):
         """Render scoring section."""
         if not hasattr(st.session_state, 'ready_for_scoring') or not st.session_state.ready_for_scoring:
             return
-        
+    
         st.markdown("### Step 2: Generate Score")
-        
+    
         if st.button("Generate Lead Score", type="primary"):
             with st.spinner("Calculating score..."):
                 try:
-                    # Get prediction
+                # Get prediction
                     prediction = self.model_predictor.predict(
-                        self.session_state.final_features
-                    )
-                    
+                    self.session_state.final_features
+                )
+                
+                    if prediction is None:
+                        st.error("Scoring failed: Model returned no prediction. Check if model files exist and features are valid.")
+                        return
+                
                     self.session_state.prediction = prediction
-                    
-                    # Display results
+                
+                # Display results
                     self._display_results(prediction)
-                    
+                
                 except Exception as e:
                     st.error(f"Scoring failed: {str(e)}")
-    
+                    import traceback
+                    st.error(f"Full error: {traceback.format_exc()}")   
+                    
     def _display_results(self, prediction: dict):
         """Display prediction results."""
+        if prediction is None:
+            st.error("No prediction results available")
+            return
+    
         st.markdown("### Scoring Results")
+    
+
         
         # Priority display
         priority = prediction.get('priority', 'UNKNOWN')
