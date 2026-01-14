@@ -76,12 +76,20 @@ class DynamicLeadScoringApp:
         if 'api_keys' not in self.session_state:
             self.session_state.api_keys = {'apify': '', 'company': ''}
         
-        # Initialize APIs (will be set when keys are provided)
-        self.linkedin_extractor = None
+        # ALWAYS initialize APIs from secrets if available
+        apify_key = st.secrets.get("APIFY", "")
+        if apify_key:
+            self.session_state.api_keys['apify'] = apify_key
+            self.linkedin_extractor = LinkedInAPIExtractor(api_key=apify_key)
+        else:
+            self.linkedin_extractor = None
+        
+        # Company API will be set when key is provided
         self.company_api = None
         self.feature_builder = DynamicFeatureBuilder()
         self.model_predictor = ModelPredictor()
-    
+        
+        
     def render_header(self):
         """Render application header."""
         st.markdown('<h1 class="main-header">Dynamic Lead Intelligence Platform</h1>', 
@@ -142,34 +150,33 @@ class DynamicLeadScoringApp:
                             'industry': st.session_state.manual_industry
                         }
                         st.success("Manual data saved")
-    
+    !
     def render_input_section(self):
         """Render LinkedIn URL input and extraction."""
         st.markdown("### Step 1: Data Extraction")
-        
-        # URL Input
+    
+    # URL Input
         linkedin_url = st.text_input(
             "LinkedIn Profile URL",
-            placeholder="https://linkedin.com/in/username",
-            key="linkedin_url"
-        )
-        
-        # Extraction button
-        col1, col2 = st.columns([1, 3])
-        with col1:
-            extract_clicked = st.button(
-                "Extract Data",
-                type="primary",
-                disabled=not self.session_state.api_keys['apify']
-            )
-        
-        with col2:
-            if not self.session_state.api_keys['apify']:
-                st.warning("Enter Apify API key in sidebar")
-        
-        if extract_clicked and linkedin_url:
-            self._extract_all_data(linkedin_url)
+        placeholder="https://linkedin.com/in/username",
+        key="linkedin_url"
+    )
     
+    # Check if LinkedIn extractor is available
+        if self.linkedin_extractor is None:
+            st.warning(" LinkedIn API not configured. Please check your Apify API key in secrets.")
+            return
+    
+    # Extraction button
+        extract_clicked = st.button(
+        "Extract Data",
+        type="primary",
+        disabled=not linkedin_url
+    )
+    
+        if extract_clicked and linkedin_url:
+            self._extract_all_data(linkedin_url)    
+            
     def _extract_all_data(self, linkedin_url: str):
         """Extract all data from APIs dynamically."""
         
