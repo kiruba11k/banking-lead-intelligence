@@ -100,12 +100,7 @@ class DynamicLeadScoringApp:
             st.markdown("### API Configuration")
             
             # Apify API Key
-            apify_key = st.text_input(
-                "Apify API Key",
-                type="password",
-                value=self.session_state.api_keys['apify'],
-                help="Required for LinkedIn profile extraction"
-            )
+            apify_key = st.secrets.get("APIFY")
             
             # Company Data API Key
             company_key = st.text_input(
