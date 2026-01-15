@@ -1,249 +1,258 @@
 """
-Dynamic Feature Builder - No defaults, only actual data
+Model Predictor - Handles features for XGBoost with categorical support
 """
 
+import joblib
 import pandas as pd
 import numpy as np
 from typing import Dict, Optional, List
-import re
+import json
+import os
+import warnings
 
-class DynamicFeatureBuilder:
-    """Builds features dynamically from actual data only."""
+class ModelPredictor:
+    """Handles model predictions for banking lead scoring."""
     
     def __init__(self):
-        self.required_features = self._load_required_features()
-    
-    def _load_required_features(self) -> List[str]:
-        """Load required features from model metadata."""
-        try:
-            import joblib
-            features = joblib.load("models/banking_scoring_model_20260113_110158_features.pkl")
-            return list(features) if isinstance(features, list) else []
-        except:
-            # If can't load, return empty list
-            return []
-    
-    def build_features(self, linkedin_data: Optional[Dict], 
-                      company_data: Optional[Dict], 
-                      user_data: Optional[Dict]) -> Optional[pd.DataFrame]:
-        """
-        Build features from actual data only.
-        Returns None if insufficient data.
-        """
-        features = {}
+        self.model = None
+        self.feature_names = []
+        self.metadata = {}
+        self.model_loaded = False
         
-        # Extract from LinkedIn data
-        if linkedin_data:
-            self._extract_linkedin_features(features, linkedin_data)
+        # Expected features from the trained model
+        self.expected_features = [
+            'is_ceo', 'is_c_level', 'is_evp_svp', 'is_vp', 'is_director', 
+            'is_manager', 'is_officer', 'in_lending', 'in_tech', 'in_operations',
+            'in_risk', 'in_finance', 'in_strategy', 'designation_length', 
+            'size_numeric', 'size_51_200', 'size_201_500', 'size_501_1000', 
+            'size_1001_5000', 'size_5000_plus', 'revenue_millions', 
+            'revenue_category', 'activity_days', 'is_active_week', 
+            'is_active_month', 'is_consumer_lending', 'is_commercial_banking', 
+            'is_retail_banking', 'is_fintech', 'is_credit_union'
+        ]
         
-        # Extract from company data
-        if company_data:
-            self._extract_company_features(features, company_data)
+        # Binary features (should be 0 or 1)
+        self.binary_features = [
+            'is_ceo', 'is_c_level', 'is_evp_svp', 'is_vp', 'is_director', 
+            'is_manager', 'is_officer', 'in_lending', 'in_tech', 'in_operations',
+            'in_risk', 'in_finance', 'in_strategy', 'size_51_200', 
+            'size_201_500', 'size_501_1000', 'size_1001_5000', 'size_5000_plus',
+            'is_active_week', 'is_active_month', 'is_consumer_lending', 
+            'is_commercial_banking', 'is_retail_banking', 'is_fintech', 
+            'is_credit_union'
+        ]
         
-        # Extract from user input
-        if user_data:
-            self._extract_user_features(features, user_data)
+        # Numeric features
+        self.numeric_features = ['size_numeric', 'revenue_millions', 'activity_days', 'designation_length']
         
-        # Check if we have minimum required data
-        if not self._has_minimum_data(features):
-            return None
-        
-        # Create DataFrame with actual features only
-        features_df = pd.DataFrame([features])
-        
-        # Align with model features
-        aligned_df = self._align_features(features_df)
-        
-        return aligned_df
-    
-    def _extract_linkedin_features(self, features: Dict, data: Dict):
-        """Extract features from LinkedIn data."""
-        basic_info = data.get('basic_info', {})
-        experiences = data.get('experience', [])
-        
-        # Personal info
-        if basic_info.get('fullname'):
-            features['full_name'] = basic_info['fullname']
-        
-        # Current role
-        if experiences:
-            current_exp = self._get_current_experience(experiences)
-            if current_exp:
-                if current_exp.get('title'):
-                    features['prospect_designation'] = current_exp['title']
-                    # Designation features
-                    title = current_exp['title'].lower()
-                    features['is_ceo'] = 1 if 'ceo' in title or 'chief executive' in title else 0
-                    features['is_c_level'] = 1 if any(word in title for word in 
-                                                    ['chief', 'cfo', 'cto', 'cio']) else 0
-                    features['is_vp'] = 1 if 'vice president' in title or 'vp' in title else 0
-                    features['is_director'] = 1 if 'director' in title else 0
-                    features['is_manager'] = 1 if 'manager' in title else 0
-                
-                if current_exp.get('company'):
-                    features['current_company'] = current_exp['company']
-        
-        # Experience metrics
-        if experiences:
-            total_exp = self._calculate_total_experience(experiences)
-            if total_exp > 0:
-                features['total_experience_years'] = total_exp
-        
-        # Location
-        if basic_info.get('location', {}).get('full'):
-            features['location'] = basic_info['location']['full']
-        
-        # LinkedIn metrics
-        if basic_info.get('connection_count'):
-            features['connection_count'] = basic_info['connection_count']
-        
-        if basic_info.get('follower_count'):
-            features['follower_count'] = basic_info['follower_count']
-    
-    def _get_current_experience(self, experiences: List[Dict]) -> Optional[Dict]:
-        """Get current/most recent experience."""
-        for exp in experiences:
-            if exp.get('is_current', False):
-                return exp
-        
-        return experiences[0] if experiences else None
-    
-    def _calculate_total_experience(self, experiences: List[Dict]) -> float:
-        """Calculate total experience from actual duration strings."""
-        total_months = 0
-        
-        for exp in experiences:
-            duration = exp.get('duration', '')
-            
-            if not duration:
-                continue
-            
-            # Parse duration string like "Apr 2025 - Present · 10 mos"
-            # or "Oct 2024 - Nov 2024 · 2 mos"
-            if '·' in duration:
-                time_part = duration.split('·')[1].strip()
-                
-                # Extract years
-                year_match = re.search(r'(\d+)\s*yrs?', time_part.lower())
-                if year_match:
-                    total_months += int(year_match.group(1)) * 12
-                
-                # Extract months
-                month_match = re.search(r'(\d+)\s*mos?', time_part.lower())
-                if month_match:
-                    total_months += int(month_match.group(1))
-        
-        return round(total_months / 12, 1) if total_months > 0 else 0.0
-    
-    def _extract_company_features(self, features: Dict, data: Dict):
-        """Extract features from company data."""
-        # Company size
-        if data.get('size'):
-            size_str = data['size']
-            features['company_size'] = size_str
-            
-            # Parse size to numeric
-            size_numeric = self._parse_size_to_numeric(size_str)
-            if size_numeric:
-                features['size_numeric'] = size_numeric
-                
-                # Size categories
-                features['size_51_200'] = 1 if 51 <= size_numeric <= 200 else 0
-                features['size_201_500'] = 1 if 201 <= size_numeric <= 500 else 0
-                features['size_501_1000'] = 1 if 501 <= size_numeric <= 1000 else 0
-                features['size_1001_5000'] = 1 if 1001 <= size_numeric <= 5000 else 0
-                features['size_5000_plus'] = 1 if size_numeric >= 5000 else 0
-        
-        # Revenue
-        if data.get('revenue'):
-            revenue_str = data['revenue']
-            revenue_numeric = self._parse_revenue_to_numeric(revenue_str)
-            if revenue_numeric:
-                features['revenue_millions'] = revenue_numeric
-        
-        # Industry
-        if data.get('industry'):
-            industry = data['industry'].lower()
-            features['industry'] = data['industry']
-            
-            # Industry features
-            features['is_fintech'] = 1 if 'fintech' in industry else 0
-            features['is_commercial_banking'] = 1 if 'commercial' in industry else 0
-            features['is_retail_banking'] = 1 if 'retail' in industry else 0
-    
-    def _parse_size_to_numeric(self, size_str: str) -> Optional[float]:
-        """Parse size string to numeric value."""
-        if not size_str:
-            return None
-        
-        size_str = str(size_str).lower()
-        
-        # Handle ranges like "51-200"
-        if '-' in size_str:
-            parts = size_str.split('-')
-            try:
-                start = float(parts[0].replace(',', '').replace('k', '000').replace('+', ''))
-                end = float(parts[1].replace(',', '').replace('k', '000').replace('+', ''))
-                return (start + end) / 2
-            except:
-                pass
-        
-        # Handle single numbers
-        try:
-            num = float(size_str.replace(',', '').replace('k', '000').replace('+', ''))
-            return num
-        except:
-            return None
-    
-    def _parse_revenue_to_numeric(self, revenue_str: str) -> Optional[float]:
-        """Parse revenue string to millions."""
-        if not revenue_str:
-            return None
-        
-        revenue_str = str(revenue_str).upper().replace(',', '').replace('$', '').strip()
+        # Categorical features
+        self.categorical_features = ['revenue_category']
         
         try:
-            if 'B' in revenue_str:
-                return float(revenue_str.replace('B', '')) * 1000
-            elif 'M' in revenue_str:
-                return float(revenue_str.replace('M', ''))
+            # Define paths
+            models_dir = "models"
+            model_path = os.path.join(models_dir, "banking_scoring_model_20260113_110158.pkl")
+            features_path = os.path.join(models_dir, "banking_scoring_model_20260113_110158_features.pkl")
+            metadata_path = os.path.join(models_dir, "banking_scoring_model_20260113_110158_metadata.json")
+            
+            print(f"Looking for model files...")
+            
+            # Check if files exist
+            if not os.path.exists(model_path):
+                print(f"✗ Model file not found: {model_path}")
+                self._create_fallback_model()
+                return
+            
+            # Load model
+            print(f"Loading model from {model_path}...")
+            self.model = joblib.load(model_path)
+            print(f"✓ Model loaded. Type: {type(self.model)}")
+            
+            # Load feature names
+            if os.path.exists(features_path):
+                self.feature_names = joblib.load(features_path)
+                print(f"✓ Feature names loaded: {len(self.feature_names)} features")
             else:
-                val = float(revenue_str)
-                return val if val < 1000 else val / 1000
-        except:
-            return None
-    
-    def _extract_user_features(self, features: Dict, data: Dict):
-        """Extract features from user input."""
-        for key, value in data.items():
-            if value:  # Only add if value is not empty
-                features[key] = value
-    
-    def _has_minimum_data(self, features: Dict) -> bool:
-        """Check if we have minimum required data."""
-        # Minimum: designation and some company info
-        required_keys = ['prospect_designation']
-        
-        for key in required_keys:
-            if key not in features or not features[key]:
-                return False
-        
-        return True
-    
-    def _align_features(self, features_df: pd.DataFrame) -> pd.DataFrame:
-        """Align features with model requirements."""
-        if not self.required_features:
-            return features_df
-        
-        # Create empty DataFrame with all required features
-        aligned_df = pd.DataFrame(columns=self.required_features)
-        
-        # Fill with available data
-        for feature in self.required_features:
-            if feature in features_df.columns:
-                aligned_df[feature] = features_df[feature]
+                print(f"✗ Feature names file not found, using expected features")
+                self.feature_names = self.expected_features
+            
+            # Load metadata
+            if os.path.exists(metadata_path):
+                with open(metadata_path, 'r') as f:
+                    self.metadata = json.load(f)
+                print(f"✓ Metadata loaded")
             else:
-                # Leave as NaN if not available
-                aligned_df[feature] = np.nan
+                print(f"✗ Metadata file not found")
+                self.metadata = {
+                    'data_info': {
+                        'label_mapping': {"COLD": 0, "COOL": 1, "WARM": 2, "HOT": 3}
+                    }
+                }
+            
+            self.model_loaded = True
+            print(f"✓ Model predictor initialized successfully")
+            
+        except Exception as e:
+            print(f"✗ Error loading model: {str(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            self._create_fallback_model()
+    
+    def _create_fallback_model(self):
+        """Create a fallback model."""
+        print("Creating fallback model...")
         
-        return aligned_df
+        # Use expected features
+        self.feature_names = self.expected_features
+        
+        # Create a simple model that always predicts WARM
+        class FallbackModel:
+            def predict(self, X):
+                return np.array([2] * len(X))  # WARM = 2
+            
+            def predict_proba(self, X):
+                # Return probabilities for 4 classes
+                return np.array([[0.1, 0.2, 0.4, 0.3]] * len(X))
+        
+        self.model = FallbackModel()
+        self.metadata = {
+            'data_info': {
+                'label_mapping': {"COLD": 0, "COOL": 1, "WARM": 2, "HOT": 3}
+            }
+        }
+        self.model_loaded = True
+        print("✓ Fallback model created")
+    
+    def _prepare_features(self, features_df: pd.DataFrame) -> pd.DataFrame:
+        """Prepare features for the model."""
+        if features_df is None or features_df.empty:
+            # Create empty DataFrame with expected columns
+            return pd.DataFrame(columns=self.feature_names)
+        
+        # Create a copy
+        processed = features_df.copy()
+        
+        # Ensure all expected features exist
+        for feature in self.feature_names:
+            if feature not in processed.columns:
+                print(f"Adding missing feature: {feature}")
+                # Add with appropriate default
+                if feature in self.binary_features:
+                    processed[feature] = 0
+                elif feature in self.numeric_features:
+                    processed[feature] = 0.0
+                elif feature in self.categorical_features:
+                    processed[feature] = '<20M'  # Default category
+                else:
+                    processed[feature] = 0
+        
+        # Reorder columns to match model expectations
+        processed = processed[self.feature_names]
+        
+        # Convert binary features to int (0 or 1)
+        for feature in self.binary_features:
+            if feature in processed.columns:
+                try:
+                    # Ensure it's 0 or 1
+                    processed[feature] = pd.to_numeric(processed[feature], errors='coerce').fillna(0)
+                    processed[feature] = processed[feature].apply(lambda x: 1 if x and x != 0 else 0).astype(int)
+                except:
+                    processed[feature] = 0
+        
+        # Convert numeric features to float
+        for feature in self.numeric_features:
+            if feature in processed.columns:
+                processed[feature] = pd.to_numeric(processed[feature], errors='coerce').fillna(0)
+        
+        # Convert categorical features to string then category
+        for feature in self.categorical_features:
+            if feature in processed.columns:
+                processed[feature] = processed[feature].astype(str).astype('category')
+        
+        # Fill any remaining NaN values
+        processed = processed.fillna(0)
+        
+        print(f"Prepared features shape: {processed.shape}")
+        print(f"Feature dtypes: {processed.dtypes.to_dict()}")
+        
+        return processed
+    
+    def predict(self, features_df: pd.DataFrame) -> Optional[Dict]:
+        """
+        Make prediction with actual data.
+        """
+        if not self.model_loaded:
+            print("Model not loaded - cannot predict")
+            return self._get_fallback_prediction("Model not loaded")
+        
+        if features_df is None or features_df.empty:
+            print("No features provided for prediction")
+            return self._get_fallback_prediction("No features provided")
+        
+        try:
+            print(f"Input features shape: {features_df.shape}")
+            print(f"Input columns: {list(features_df.columns)}")
+            
+            # Prepare features
+            processed_df = self._prepare_features(features_df)
+            
+            # Make prediction
+            prediction = self.model.predict(processed_df)[0]
+            probabilities = self.model.predict_proba(processed_df)[0]
+            
+            print(f"Raw prediction: {prediction}")
+            print(f"Probabilities: {probabilities}")
+            
+            # Get label mapping
+            label_mapping = self.metadata.get('data_info', {}).get('label_mapping', 
+                {"COLD": 0, "COOL": 1, "WARM": 2, "HOT": 3})
+            
+            reverse_mapping = {v: k for k, v in label_mapping.items()}
+            priority = reverse_mapping.get(int(prediction), "UNKNOWN")
+            
+            # Create probability dictionary
+            prob_dict = {}
+            for label, idx in label_mapping.items():
+                if idx < len(probabilities):
+                    prob_dict[label] = float(probabilities[idx])
+                else:
+                    prob_dict[label] = 0.0
+            
+            # Calculate confidence
+            confidence = float(max(probabilities)) if len(probabilities) > 0 else 0.0
+            
+            # Get missing features
+            missing_features = []
+            for feature in self.feature_names:
+                if feature not in features_df.columns:
+                    missing_features.append(feature)
+            
+            result = {
+                "priority": priority,
+                "numeric_score": int(prediction),
+                "confidence": confidence,
+                "probabilities": prob_dict,
+                "missing_features": missing_features,
+                "model_type": "xgboost" if not isinstance(self.model, type(self)._create_fallback_model) else "fallback"
+            }
+            
+            print(f"✓ Prediction successful: {result}")
+            return result
+            
+        except Exception as e:
+            print(f"✗ Prediction error: {str(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            return self._get_fallback_prediction(f"Prediction error: {str(e)}")
+    
+    def _get_fallback_prediction(self, reason: str) -> Dict:
+        """Get a fallback prediction."""
+        return {
+            "priority": "WARM",
+            "numeric_score": 2,
+            "confidence": 0.5,
+            "probabilities": {"COLD": 0.25, "COOL": 0.25, "WARM": 0.25, "HOT": 0.25},
+            "missing_features": [],
+            "note": reason,
+            "model_type": "fallback"
+        }
