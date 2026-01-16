@@ -256,3 +256,76 @@ class ModelPredictor:
             "note": reason,
             "model_type": "fallback"
         }
+    
+    def get_feature_importance(self) -> Optional[Dict]:
+        """
+        Get feature importance from the model.
+        Returns a dictionary of feature names and their importance scores.
+        """
+        if not self.model_loaded:
+            print("Model not loaded - cannot get feature importance")
+            return None
+        
+        try:
+            # Check if model has feature_importances_ attribute
+            if hasattr(self.model, 'feature_importances_'):
+                importances = self.model.feature_importances_
+                
+                if len(importances) == len(self.feature_names):
+                    # Create dictionary of feature names and importance scores
+                    importance_dict = dict(zip(self.feature_names, importances))
+                    
+                    # Sort by importance (descending)
+                    sorted_dict = {k: v for k, v in sorted(
+                        importance_dict.items(), 
+                        key=lambda item: item[1], 
+                        reverse=True
+                    )}
+                    
+                    print(f"Feature importance calculated: {len(sorted_dict)} features")
+                    return sorted_dict
+                else:
+                    print(f"Mismatch: Model has {len(importances)} importances, but {len(self.feature_names)} feature names")
+                    return None
+            else:
+                # For XGBoost, try to get importance using get_booster()
+                if hasattr(self.model, 'get_booster'):
+                    try:
+                        import xgboost as xgb
+                        booster = self.model.get_booster()
+                        importance_dict = booster.get_score(importance_type='weight')
+                        
+                        # Convert to dictionary with feature names
+                        result = {}
+                        for feature_idx, importance in importance_dict.items():
+                            feature_name = f"f{feature_idx}"
+                            # Try to map feature index to actual feature name
+                            try:
+                                feature_idx_int = int(feature_idx.replace('f', ''))
+                                if feature_idx_int < len(self.feature_names):
+                                    feature_name = self.feature_names[feature_idx_int]
+                            except:
+                                pass
+                            result[feature_name] = importance
+                        
+                        # Sort by importance
+                        sorted_dict = {k: v for k, v in sorted(
+                            result.items(),
+                            key=lambda item: item[1],
+                            reverse=True
+                        )}
+                        
+                        print(f"XGBoost feature importance calculated")
+                        return sorted_dict
+                    except Exception as e:
+                        print(f"Could not get XGBoost feature importance: {e}")
+                        return None
+                else:
+                    print("Model does not have feature_importances_ attribute")
+                    return None
+                
+        except Exception as e:
+            print(f"Error getting feature importance: {str(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            return None
