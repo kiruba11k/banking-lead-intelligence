@@ -346,19 +346,13 @@ class DynamicLeadScoringApp:
                     
     def _display_results(self, prediction: dict):
         """Display prediction results."""
-        if prediction is None:
-            st.error("No prediction results available")
-            return
-    
         st.markdown("### Scoring Results")
-    
 
-        
         # Priority display
         priority = prediction.get('priority', 'UNKNOWN')
         confidence = prediction.get('confidence', 0)
         probabilities = prediction.get('probabilities', {})
-        
+
         # Priority colors
         priority_colors = {
             'COLD': '#64748b',
@@ -366,12 +360,12 @@ class DynamicLeadScoringApp:
             'WARM': '#f59e0b',
             'HOT': '#dc2626'
         }
-        
+
         color = priority_colors.get(priority, '#64748b')
-        
+
         # Display priority
         col1, col2 = st.columns([2, 1])
-        
+
         with col1:
             st.markdown(f"""
                 <div style='border-left: 5px solid {color}; padding-left: 20px;'>
@@ -379,7 +373,7 @@ class DynamicLeadScoringApp:
                     <p style='color: #475569;'>Confidence: {confidence:.1%}</p>
                 </div>
             """, unsafe_allow_html=True)
-        
+
         with col2:
             priority_prob = probabilities.get(priority, 0)
             st.markdown(f"""
@@ -390,19 +384,19 @@ class DynamicLeadScoringApp:
                     </div>
                 </div>
             """, unsafe_allow_html=True)
-        
+
         # Progress bar
         st.progress(float(confidence))
-        
+
         # Probability distribution
         if probabilities:
             st.markdown("#### Probability Distribution")
-            
+
             prob_df = pd.DataFrame({
                 'Priority': list(probabilities.keys()),
                 'Probability': list(probabilities.values())
             })
-            
+
             # Create chart
             fig = go.Figure(data=[
                 go.Bar(
@@ -413,25 +407,32 @@ class DynamicLeadScoringApp:
                     textposition='auto'
                 )
             ])
-            
+
             fig.update_layout(
                 height=300,
                 margin=dict(l=20, r=20, t=20, b=20),
                 yaxis=dict(tickformat='.0%', range=[0, 1]),
                 showlegend=False
             )
-            
+
             st.plotly_chart(fig, use_container_width=True)
-        
-        # Feature importance
-        if hasattr(self.model_predictor.model, 'feature_importances_'):
-            st.markdown("#### Key Factors")
-            
-            importance = self.model_predictor.get_feature_importance()
-            if importance is not None:
-                for feature, score in importance.items():
-                    if score > 0.01:  # Only show meaningful factors
-                        st.text(f"{feature}: {score:.3f}")
+
+        # Feature importance - with safe check
+        try:
+            if hasattr(self.model_predictor, 'get_feature_importance'):
+                importance = self.model_predictor.get_feature_importance()
+                if importance is not None and len(importance) > 0:
+                    st.markdown("#### Key Factors")
+
+                    # Show top 5 most important features
+                    top_features = dict(list(importance.items())[:5])
+                    for feature, score in top_features.items():
+                        if score > 0.01:  # Only show meaningful factors
+                            st.text(f"{feature}: {score:.3f}")
+        except AttributeError as e:
+            print(f"Feature importance not available: {e}")
+        except Exception as e:
+            print(f"Error displaying feature importance: {e}")
     
     def run(self):
         """Main application execution."""
