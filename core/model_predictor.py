@@ -51,9 +51,9 @@ class ModelPredictor:
         try:
             # Define paths
             models_dir = "models"
-            model_path = os.path.join(models_dir, "banking_scoring_model_20260113_110158.pkl")
-            features_path = os.path.join(models_dir, "banking_scoring_model_20260113_110158_features.pkl")
-            metadata_path = os.path.join(models_dir, "banking_scoring_model_20260113_110158_metadata.json")
+            model_path = os.path.join(models_dir, "banking_scoring_model_20260118_132024.pkl")
+            features_path = os.path.join(models_dir, "banking_scoring_model_20260118_132024_features.pkl")
+            metadata_path = os.path.join(models_dir, "banking_scoring_model_20260118_132024_metadata.json")
             
             print(f"Looking for model files...")
             
