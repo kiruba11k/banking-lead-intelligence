@@ -122,8 +122,10 @@ class DynamicFeatureBuilder:
         features['in_strategy'] = 1 if any(term in designation for term in ['strategy', 'transformation', 'innovation', 'growth']) else 0
         
         # Title length features
-        features['designation_length'] = len(designation)
         
+        features['designation_length'] = len(designation)
+        features['designation_word_count'] = len(designation.split()) if designation else 0
+
         return features
     
     def _get_current_position(self, linkedin_data: Dict) -> Optional[Dict]:
