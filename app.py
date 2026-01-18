@@ -314,7 +314,7 @@ class DynamicLeadScoringApp:
             with col3:
                 if company_data.get('industry'):
                     st.text(f"Industry: {company_data['industry']}")
-    1
+    
     def render_scoring_section(self):
         """Render scoring section."""
         if not hasattr(st.session_state, 'ready_for_scoring') or not st.session_state.ready_for_scoring:
