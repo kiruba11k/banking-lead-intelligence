@@ -50,18 +50,41 @@ class ModelPredictor:
         
         try:
             # Define paths
-            models_dir = "models"
-            model_path = os.path.join(models_dir, "banking_scoring_model_20260118_132024.pkl")
-            features_path = os.path.join(models_dir, "banking_scoring_model_20260118_132024_features.pkl")
-            metadata_path = os.path.join(models_dir, "banking_scoring_model_20260118_132024_metadata.json")
-            
-            print(f"Looking for model files...")
-            
-            # Check if files exist
-            if not os.path.exists(model_path):
-                print(f"✗ Model file not found: {model_path}")
+            base_dir = os.path.dirname(os.path.abspath(__file__))   # core/
+            project_root = os.path.dirname(base_dir)                # project/
+
+            possible_dirs = [
+    os.path.join(project_root, "models"),
+    project_root,
+    os.getcwd(),
+    ]
+
+            model_filename = "banking_scoring_model_20260118_132024.pkl"
+            features_filename = "banking_scoring_model_20260118_132024_features.pkl"
+            metadata_filename = "banking_scoring_model_20260118_132024_metadata.json"
+
+            model_path = None
+            features_path = None
+            metadata_path = None
+
+            for d in possible_dirs:
+                mp = os.path.join(d, model_filename)
+                fp = os.path.join(d, features_filename)
+                jp = os.path.join(d, metadata_filename)
+
+                if os.path.exists(mp):
+                    model_path = mp
+                if os.path.exists(fp):
+                    features_path = fp
+                if os.path.exists(jp):
+                    metadata_path = jp
+
+            if not model_path:
+                print("✗ Model file not found in any expected location.")
                 self._create_fallback_model()
-                return
+            return
+
+
             
             # Load model
             print(f"Loading model from {model_path}...")
